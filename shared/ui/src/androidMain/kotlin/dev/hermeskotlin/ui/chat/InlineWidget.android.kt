@@ -2,8 +2,10 @@ package dev.hermeskotlin.ui.chat
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
@@ -24,6 +26,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import dev.hermeskotlin.designsystem.R
 import java.io.ByteArrayInputStream
 import kotlin.io.encoding.Base64
+import kotlin.math.hypot
 
 /** Untrusted widget HTML gets no gateway origin, cookies, storage, native bridge or network. */
 @Composable
@@ -35,7 +38,7 @@ internal actual fun WidgetWebView(html: String, theme: WidgetTheme, name: String
         LaunchedEffect(Unit) { failure.value("Update Android System WebView to run this widget.") }
         return
     }
-    val font = remember { context.resources.openRawResource(R.font.geist_regular).use { Base64.encode(it.readBytes()) } }
+    val font = remember { widgetFont(context) }
     val document = remember(html, theme, font) { widgetDocument(html, theme, font) }
     val currentDocument = rememberUpdatedState(document)
     val view = remember { createWidgetWebView(context, name, { currentDocument.value }) { failure.value("Couldn't display this widget.") } }
@@ -43,7 +46,8 @@ internal actual fun WidgetWebView(html: String, theme: WidgetTheme, name: String
         onDispose { view.stopLoading(); view.destroy() }
     }
     AndroidView(factory = { view }, modifier = modifier, update = {
-        if (it.tag != document) {
+        // By identity: the document is remembered, and comparing its text would read it all on each update.
+        if (it.tag !== document) {
             it.tag = document
             it.loadUrl(WIDGET_URL)
         }
@@ -51,6 +55,12 @@ internal actual fun WidgetWebView(html: String, theme: WidgetTheme, name: String
 }
 
 private const val WIDGET_URL = "https://herald-widget.invalid/"
+
+/** Geist as base64, which every widget's document embeds; read once, on the main thread like the widgets. */
+private var cachedFont: String? = null
+
+private fun widgetFont(context: Context): String = cachedFont
+    ?: context.resources.openRawResource(R.font.geist_regular).use { Base64.encode(it.readBytes()) }.also { cachedFont = it }
 
 /** The same restricted host for each widget; its document always arrives as app-supplied text. */
 @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
@@ -60,9 +70,37 @@ internal fun createWidgetWebView(context: Context, name: String, document: () ->
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         setBackgroundColor(Color.TRANSPARENT)
         contentDescription = name
-        // Keep iframe scrolling and controls out of the transcript's drag gesture. WebView owns clicks.
+        // Each drag goes to the widget or to the transcript, decided once from the widget's last report (as the title)
+        // after a little movement, before the transcript's own touch slop: widgetKeepsDrag. A second finger (a pinch)
+        // always stays in the widget. WebView owns clicks.
+        var report = WidgetReport()
+        var downX = 0f
+        var downY = 0f
+        var decided = false
+        val decideAfter = ViewConfiguration.get(context).scaledTouchSlop / 2f
+        val density = resources.displayMetrics.density
         setOnTouchListener { view, event ->
-            view.parent?.requestDisallowInterceptTouchEvent(event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    // A fast flick can pass the transcript's touch slop on its first move, before it's decided here.
+                    decided = widgetKeepsTouch(report, downX / density, downY / density)
+                    if (decided) view.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    decided = true
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE -> if (!decided) {
+                    val dx = event.x - downX
+                    val dy = event.y - downY
+                    if (hypot(dx, dy) >= decideAfter) {
+                        decided = true
+                        view.parent?.requestDisallowInterceptTouchEvent(widgetKeepsDrag(report, downX / density, downY / density, dx, dy))
+                    }
+                }
+            }
             false
         }
         settings.apply {
@@ -79,8 +117,17 @@ internal fun createWidgetWebView(context: Context, name: String, document: () ->
         }
         webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
+
+            override fun onReceivedTitle(view: WebView, title: String?) {
+                widgetReport(title)?.let { report = it }
+            }
         }
         webViewClient = object : WebViewClient() {
+            // A reloaded document (a theme change) reports for itself; the last one's areas are gone.
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                report = WidgetReport()
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse =

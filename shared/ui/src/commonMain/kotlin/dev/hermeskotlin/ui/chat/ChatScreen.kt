@@ -696,8 +696,8 @@ internal fun ChatView(
                     if (state.historyLoaded && state.messages.isNotEmpty()) {
                         CompositionLocalProvider(
                             LocalMediaLoader provides actions::loadMedia,
-                            LocalLinkPreviewLoader provides linkPreviewLoader,
                             LocalWidgetFiles provides widgetFiles,
+                            LocalLinkPreviewLoader provides linkPreviewLoader,
                             LocalOpenImage provides onViewImage,
                             LocalFileLinks provides { link -> GatewayFile.fromLink(link)?.let(onOpenFile) },
                             LocalNotice provides onNotice,
