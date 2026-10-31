@@ -1,0 +1,82 @@
+name: Fork upstream sync
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      validate:
+        description: Run application checks even when upstream is unchanged
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: fork-upstream-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: github.repository == 'StavenCross/kyllene'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      sha: ${{ steps.merge.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test fork policy
+        run: python3 -m unittest discover -s .github/fork-tools/tests -p test_policy.py -v
+      - name: Merge upstream without overwriting fork changes
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/Giton22/kyllene.git master
+          before=$(git rev-parse HEAD)
+          python3 .github/fork-tools/policy.py sync --upstream FETCH_HEAD
+          after=$(git rev-parse HEAD)
+          if [ "$before" != "$after" ]; then
+            expected_tree=$(git rev-parse 'HEAD^{tree}')
+            remote_before=$(gh api repos/StavenCross/kyllene/git/ref/heads/master --jq .object.sha)
+            test "$remote_before" = "$before"
+            gh api --method POST repos/StavenCross/kyllene/merge-upstream -f branch=master
+            git fetch --no-tags origin master
+            after=$(git rev-parse FETCH_HEAD)
+            test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$expected_tree"
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$after" >> "$GITHUB_OUTPUT"
+          echo "Fork master checked at $after" >> "$GITHUB_STEP_SUMMARY"
+  checks:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true' || inputs.validate == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: jetbrains
+          java-version: '25'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - name: Run the same checks available locally
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml fontconfig
+          python3 .github/fork-tools/checks.py

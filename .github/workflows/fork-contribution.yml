@@ -1,0 +1,44 @@
+name: Fork contribution isolation
+on:
+  # Only trusted base policy runs; PR files are inspected as Git data, never executed.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Contribution branch in this fork to inspect
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  isolation:
+    if: github.repository == 'StavenCross/kyllene'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Inspect contribution against upstream
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          git fetch --no-tags https://github.com/Giton22/kyllene.git master
+          upstream=$(git rev-parse FETCH_HEAD)
+          if [ "$EVENT" = pull_request_target ]; then
+            git fetch --no-tags https://github.com/StavenCross/kyllene.git "refs/pull/$PR_NUMBER/head"
+            head=$(git rev-parse FETCH_HEAD)
+            test "$head" = "$EXPECTED_HEAD"
+          else
+            git check-ref-format "refs/heads/$BRANCH"
+            git fetch --no-tags https://github.com/StavenCross/kyllene.git "refs/heads/$BRANCH"
+            head=$(git rev-parse FETCH_HEAD)
+          fi
+          python3 .github/fork-tools/policy.py contribution --upstream "$upstream" --head "$head"
+          echo "Contribution $head checked against upstream $upstream" >> "$GITHUB_STEP_SUMMARY"
