@@ -55,18 +55,25 @@ jobs:
           java-version: '25'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - name: Tool and packaging regression tests
+      - name: Fork tooling regression tests
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-yaml flatpak fontconfig
           python3 -m unittest discover -s tooling/.github/fork-tools/tests -v
-          (cd package && python3 -m unittest discover -s packaging/flatpak/tests -v)
       - name: Install latest selected runtime and SDK
         run: |
           runtime=$(python3 -c 'import json; print(json.load(open("package/packaging/flatpak/fork-ci.json"))["runtime-version"])')
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive flathub org.flatpak.Builder "org.freedesktop.Sdk//$runtime" "org.freedesktop.Platform//$runtime"
           flatpak info --user --show-commit "org.freedesktop.Platform//$runtime" >> "$GITHUB_STEP_SUMMARY"
+      - name: Packaging tests with the selected SDK font library
+        run: |
+          FORK_RUNTIME=$(python3 -c 'import json; print(json.load(open("package/packaging/flatpak/fork-ci.json"))["runtime-version"])')
+          export FORK_RUNTIME
+          export FORK_PACKAGE="$PWD/package"
+          export PATH="$PWD/tooling/.github/fork-tools/sdk-bin:$PATH"
+          cd package || exit 1
+          python3 -m unittest discover -s packaging/flatpak/tests -v
       - name: Build locked dependencies offline against selected source
         run: |
           user_flatpak=$(realpath "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak")

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Font fixtures must use the package SDK, not the runner's older host fontconfig.
+set -euo pipefail
+: "${FORK_RUNTIME:?Select the tested Flatpak runtime}"
+: "${FORK_PACKAGE:?Select the packaging test checkout}"
+: "${FONTCONFIG_FILE:?Only isolated font fixtures are supported}"
+fixture=$(dirname "$(realpath "$FONTCONFIG_FILE")")
+exec flatpak run --filesystem="$fixture" --filesystem="$FORK_PACKAGE:ro" --env="FONTCONFIG_FILE=$FONTCONFIG_FILE" \
+  --command=fc-list "org.freedesktop.Sdk//$FORK_RUNTIME" "$@"

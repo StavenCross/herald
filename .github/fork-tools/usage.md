@@ -52,6 +52,9 @@ latest installed updates for the manifest's runtime/SDK, keeping application
 build dependencies locked. It does not automatically upgrade Gradle dependencies.
 Until master contains packaging, it uses the published PR01 packaging branch;
 source SHA, packaging SHA and runtime commit are recorded separately in the run.
+Packaging font fixtures use the selected SDK fontconfig through a narrow `fc-list`
+wrapper; older host fontconfig versions have different filtering behavior. The
+wrapper grants only the synthetic fixture and read-only test checkout paths.
 A candidate runtime must actually exist on Flathub; an unavailable branch fails.
 
 The workflow checks the manifest and exported permissions against the reviewed
