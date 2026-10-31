@@ -1,5 +1,7 @@
 package dev.hermeskotlin.ui.rooms
 
+import dev.hermeskotlin.designsystem.components.ScrollbarBox
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +33,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.X
 import com.composeunstyled.Text
 import com.composeunstyled.theme.Theme
+import dev.hermeskotlin.core.bots.Bot
 import dev.hermeskotlin.core.media.GatewayFile
 import dev.hermeskotlin.core.rooms.DesktopLine
 import dev.hermeskotlin.core.rooms.DesktopRoom
@@ -68,7 +71,7 @@ fun DesktopRoomScreen(room: DesktopRoom, onOpenSidebar: () -> Unit, onBack: () -
             TopBar(
                 title = room.name,
                 titleFace = members.takeIf { it.isNotEmpty() }?.let { { RoomFaces(it, faces, size = 20.dp, max = 3) } },
-                status = BarStatus("On Desktop", StatusTone.Neutral),
+                status = BarStatus("On Hermes Desktop", StatusTone.Neutral),
                 onOpenSidebar = onOpenSidebar,
                 onNewChat = null,
                 onOpenMenu = null,
@@ -76,7 +79,7 @@ fun DesktopRoomScreen(room: DesktopRoom, onOpenSidebar: () -> Unit, onBack: () -
             )
             // Why there is no composer: the room keeps running on Desktop; this is its newest lines.
             Text(
-                "Continue on Desktop — the room runs there. New lines show here as it syncs.",
+                "Continue on Hermes Desktop — the room runs there. New lines show here as it syncs.",
                 modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp),
                 style = Theme[typography][caption],
                 color = Theme[colors][textTertiary],
@@ -113,6 +116,7 @@ private fun Transcript(room: DesktopRoom, lines: List<RoomLine.Message>, faces: 
         if (atEndOnce) listState.animateScrollToItem(end) else listState.scrollToItem(end)
         atEndOnce = true
     }
+    ScrollbarBox(listState, Modifier.fillMaxSize()) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -142,6 +146,7 @@ private fun Transcript(room: DesktopRoom, lines: List<RoomLine.Message>, faces: 
             }
         }
     }
+    }
 }
 
 /**
@@ -166,3 +171,11 @@ private fun DesktopLine.toRoomLine(index: Int, key: String): RoomLine.Message = 
     profile = speaker.takeUnless { fromUser },
     createdAt = at?.div(1000.0),
 )
+
+/**
+ * The profile a Desktop room's file is read through: a member whose name is one of this gateway's [bots].
+ * The mirror doesn't say which gateway a member ran on, so a name the roster doesn't know reads nothing.
+ * A name is all there is to go on: a member that ran elsewhere under a name this gateway also has (such as
+ * "default") still reads this gateway's file at that path.
+ */
+internal fun desktopFileOwner(speaker: String?, bots: List<Bot>): String? = speaker?.takeIf { name -> bots.any { it.name == name } }

@@ -1,5 +1,7 @@
 package dev.hermeskotlin.ui.rooms
 
+import androidx.compose.runtime.saveable.SaverScope
+import dev.hermeskotlin.core.bots.Bot
 import dev.hermeskotlin.core.gateway.GatewayUrl
 import dev.hermeskotlin.core.media.GatewayFile
 import dev.hermeskotlin.core.media.MediaApi
@@ -14,8 +16,64 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 class RoomFileLinksTest {
+    @Test
+    fun aLineOpensItsGatewayFilesAsItsOwnBotAndLeavesWebLinksAlone() {
+        val opened = mutableListOf<Pair<String?, GatewayFile>>()
+        val open = { profile: String?, file: GatewayFile -> opened += profile to file }
+        roomFileLink("file:///output/report.md", "scribe", open)
+        roomFileLink("/output/data.csv#L3", "ops", open)
+        roomFileLink("https://example.com/report.md", "scribe", open)
+        roomFileLink("mailto:someone@example.com", "scribe", open)
+        assertEquals(listOf<Pair<String?, GatewayFile>>("scribe" to GatewayFile("/output/report.md"), "ops" to GatewayFile("/output/data.csv", 3)), opened)
+    }
+
+    @Test
+    fun aDesktopMemberReadsFilesOnlyAsABotOfThisGateway() {
+        val bots = listOf(Bot("default", isDefault = true), Bot("scribe"))
+        assertEquals("scribe", desktopFileOwner("scribe", bots))
+        assertEquals("default", desktopFileOwner("default", bots))
+        assertNull(desktopFileOwner("elsewhere", bots))
+        assertNull(desktopFileOwner(null, bots))
+        assertNull(desktopFileOwner("scribe", emptyList()))
+    }
+
+    @Test
+    fun anOpenRoomFileSurvivesBeingSavedAndRestored() {
+        val scope = SaverScope { true }
+        val link = RoomFileLink(first, hosted, "scribe", GatewayFile("/output/data.csv", 12))
+        val saved = with(RoomFileLink.Saver) { scope.save(link) }!!
+        assertEquals(link, RoomFileLink.Saver.restore(saved))
+        val noLine = RoomFileLink(first, desktop, null, file)
+        assertEquals(noLine, RoomFileLink.Saver.restore(with(RoomFileLink.Saver) { scope.save(noLine) }!!))
+        assertNull(with(RoomFileLink.Saver) { scope.save(null) })
+    }
+
+    @Test
+    fun aFileShowsOnlyOverTheRoomItCameFrom() {
+        val link = RoomFileLink(first, hosted, "scribe", file)
+        assertEquals(link, link.shownIn(hosted, emptyList()))
+        // Restored before its room is open again, or with another room open: nothing shows, nothing is read.
+        assertNull(link.shownIn(null, emptyList()))
+        assertNull(link.shownIn(RoomFileLink.roomKey("other", null), emptyList()))
+        assertNull(link.shownIn(desktop, emptyList()))
+        assertEquals(hosted, RoomFileLink.roomKey("r1", "id:r1"))
+        assertNull(RoomFileLink.roomKey(null, null))
+    }
+
+    @Test
+    fun aDesktopFileFindsItsOwnerOnceTheRosterHasIt() {
+        val link = RoomFileLink(first, desktop, "scribe", file)
+        // Tapped while the roster was still loading: no owner yet, so no request.
+        assertNull(link.shownIn(desktop, emptyList())!!.profile)
+        assertEquals("scribe", link.shownIn(desktop, listOf(Bot("scribe")))!!.profile)
+        assertNull(link.shownIn(desktop, listOf(Bot("default")))!!.profile)
+    }
+
+    private val hosted = RoomFileLink.roomKey("r1", null)!!
+    private val desktop = RoomFileLink.roomKey(null, "id:r1")!!
     private val file = GatewayFile("/output/report.md")
     private val first = GatewayUrl.parse("https://first.example")
     private val second = GatewayUrl.parse("https://second.example")
@@ -29,7 +87,7 @@ class RoomFileLinksTest {
             if (request.url.encodedPath.endsWith("read-text")) respond("""{"text":"report"}""", headers = json)
             else respond("report")
         }))
-        val targets = listOf(RoomFileLink(first, "a", file), RoomFileLink(first, "b", file), RoomFileLink(second, "a", file))
+        val targets = listOf(RoomFileLink(first, hosted, "a", file), RoomFileLink(first, hosted, "b", file), RoomFileLink(second, hosted, "a", file))
         targets.forEach { target ->
             assertEquals("report", assertIs<FileLoad.Ready>(target.preview(api)).text.text)
             assertEquals("report", assertIs<FileDownload.Ready>(target.download(api)).bytes.decodeToString())
@@ -50,7 +108,7 @@ class RoomFileLinksTest {
         var requests = 0
         val api = MediaApi(createHttpClient(MockEngine { requests++; respond("wrong file") }))
         listOf(null, "", " ").forEach { profile ->
-            val target = RoomFileLink(first, profile, file)
+            val target = RoomFileLink(first, hosted, profile, file)
             assertIs<FileLoad.Failed>(target.preview(api))
             assertIs<FileDownload.Failed>(target.download(api))
         }
@@ -64,7 +122,7 @@ class RoomFileLinksTest {
             paths += request.url.encodedPath
             respond("""{"detail":"Sensitive file"}""", HttpStatusCode.Forbidden, json)
         }))
-        val target = RoomFileLink(first, "a", file)
+        val target = RoomFileLink(first, hosted, "a", file)
         assertEquals("The gateway keeps files like this one private.", assertIs<FileLoad.Failed>(target.preview(api)).message)
         assertEquals("The gateway keeps files like this one private.", assertIs<FileDownload.Failed>(target.download(api)).message)
         assertEquals(listOf("/api/fs/read-text", "/api/fs/download"), paths)

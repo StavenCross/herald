@@ -1,5 +1,6 @@
 package dev.hermeskotlin.ui.assistant
 
+import dev.hermeskotlin.ui.imeVisible
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,7 +10,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -122,6 +122,7 @@ import dev.hermeskotlin.ui.chat.ComposerButton
 import dev.hermeskotlin.ui.chat.DictationButton
 import dev.hermeskotlin.ui.chat.DockShadow
 import dev.hermeskotlin.ui.chat.InputRequestPanel
+import dev.hermeskotlin.ui.chat.ProvideReplySpeaker
 import dev.hermeskotlin.ui.chat.ReplyHeader
 import dev.hermeskotlin.ui.chat.SendButton
 import dev.hermeskotlin.ui.chat.SendIcon
@@ -247,6 +248,7 @@ private fun Card(
     val circled by model.circledPart.collectAsState()
     val dictation by model.voice.dictation.collectAsState()
     val shows by model.shows.collectAsState()
+    val speaker by model.speaker.collectAsState()
 
     // Calling the assistant up is asking to talk: listen straight away, on every call-up, when the app may.
     if (phase == AssistantPhase.Ready) {
@@ -266,18 +268,21 @@ private fun Card(
             override fun dropCircled() = model.dropCircled()
         }
     }
-    AssistantCard(
-        state = AssistantCardState(
-            phase, chat, connection is ConnectionState.Connected, connectionLabel(connection), screen, includeScreen, circled, dictation,
-        ),
-        actions = actions,
-        microphoneAllowed = microphoneAllowed,
-        onOpenHerald = { onOpenHerald(model.storedSessionId()) },
-        onSignIn = { onOpenHerald(null) },
-        onAllowMicrophone = onAllowMicrophone,
-        onOpenScreenSettings = onOpenScreenSettings,
-        onClose = onClose,
-    )
+    // The bot answering, named above its replies; null leaves them to the mark and "Hermes".
+    ProvideReplySpeaker(speaker) {
+        AssistantCard(
+            state = AssistantCardState(
+                phase, chat, connection is ConnectionState.Connected, connectionLabel(connection), screen, includeScreen, circled, dictation,
+            ),
+            actions = actions,
+            microphoneAllowed = microphoneAllowed,
+            onOpenHerald = { onOpenHerald(model.storedSessionId()) },
+            onSignIn = { onOpenHerald(null) },
+            onAllowMicrophone = onAllowMicrophone,
+            onOpenScreenSettings = onOpenScreenSettings,
+            onClose = onClose,
+        )
+    }
 }
 
 /**
@@ -336,7 +341,7 @@ internal fun AssistantCard(
     }
 }
 
-/** The chat's top bar in small: the mark, "Herald" over its status line, and Open and Close in a ringed pill. */
+/** The chat's top bar in small: the mark, "Kyllene" over its status line, and Open and Close in a ringed pill. */
 @Composable
 private fun Header(status: BarStatus?, onCircle: (() -> Unit)?, onOpenHerald: () -> Unit, onClose: () -> Unit) {
     Row(
@@ -347,7 +352,7 @@ private fun Header(status: BarStatus?, onCircle: (() -> Unit)?, onOpenHerald: ()
         AppMark(28.dp, glow = false)
         Column(Modifier.weight(1f)) {
             Text(
-                "Herald",
+                "Kyllene",
                 style = Theme[typography][body].copy(fontWeight = FontWeight.SemiBold, lineHeight = 19.sp),
                 color = Theme[colors][textColor],
                 maxLines = 1,
@@ -362,7 +367,7 @@ private fun Header(status: BarStatus?, onCircle: (() -> Unit)?, onOpenHerald: ()
                 .border(1.dp, Theme[colors][stroke], shape),
         ) {
             onCircle?.let { BarButton(Lucide.LassoSelect, "Circle part of the screen", onClick = it) }
-            BarButton(Lucide.Maximize2, "Open in Herald", onClick = onOpenHerald)
+            BarButton(Lucide.Maximize2, "Open in Kyllene", onClick = onOpenHerald)
             BarButton(Lucide.X, "Close", onClick = onClose)
         }
     }
@@ -372,11 +377,11 @@ private fun Header(status: BarStatus?, onCircle: (() -> Unit)?, onOpenHerald: ()
 private fun SignedOut(onOpenHerald: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(
-            "Sign in to a Hermes gateway in Herald to ask about your screen.",
+            "Sign in to a Hermes gateway in Kyllene to ask about your screen.",
             style = Theme[typography][body],
             color = Theme[colors][textSecondary],
         )
-        Button("Open Herald", onClick = onOpenHerald, modifier = Modifier.fillMaxWidth())
+        Button("Open Kyllene", onClick = onOpenHerald, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -452,7 +457,7 @@ private fun Prompt(message: ChatMessage.User) {
     }
 }
 
-/** A reply as the chat shows one: the mark and "Hermes" above the text. */
+/** A reply as the chat shows one: the bot answering (or the mark and "Hermes") above the text. */
 @Composable
 private fun Reply(message: ChatMessage.Assistant) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -486,9 +491,9 @@ private fun Composer(
     var focused by remember { mutableStateOf(false) }
     // As in the chat: Back hides the keyboard but leaves the field focused, which lights the edge and brings the
     // keyboard back on the next relayout. Put away means done typing.
-    val imeVisible = WindowInsets.isImeVisible
+    val keyboardUp = imeVisible
     val focusManager = LocalFocusManager.current
-    LaunchedEffect(imeVisible) { if (!imeVisible && focused) focusManager.clearFocus() }
+    LaunchedEffect(keyboardUp) { if (!keyboardUp && focused) focusManager.clearFocus() }
     val tray: (@Composable () -> Unit)? = when {
         circled != null -> { { CircledChip(circled, onCircleAgain = actions::startCircling, onRemove = actions::dropCircled) } }
         !chat.hasConversation && screen.missed -> { { ScreenUnavailable(onOpenScreenSettings) } }
@@ -632,7 +637,7 @@ private fun ScreenUnavailable(onOpenSettings: () -> Unit) {
             UnstyledIcon(Lucide.ScanText, contentDescription = null, tint = Theme[colors][textSecondary], modifier = Modifier.size(18.dp))
         }
         Column(Modifier.weight(1f, fill = false)) {
-            Text("Herald can't see the screen", style = Theme[typography][label].copy(fontWeight = FontWeight.Medium), color = Theme[colors][textColor])
+            Text("Kyllene can't see the screen", style = Theme[typography][label].copy(fontWeight = FontWeight.Medium), color = Theme[colors][textColor])
             Text(
                 "Turn on \"Use text from screen\"",
                 style = Theme[typography][caption],

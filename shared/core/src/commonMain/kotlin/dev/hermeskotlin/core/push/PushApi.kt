@@ -126,12 +126,22 @@ class PushApi(private val connection: GatewayConnection) {
      */
     val updates: StateFlow<Int> = _updates.asStateFlow()
 
+    private val _registrations = MutableStateFlow(0)
+
+    /**
+     * Counts this phone's push registrations made or given up: phone tools tell the gateway the push id a call can
+     * ring through, so one made after the tools were reported reaches the gateway too.
+     */
+    val registrations: StateFlow<Int> = _registrations.asStateFlow()
+
+    fun registrationChanged() = _registrations.update { it + 1 }
+
     /** The plugin's state, or null when it isn't installed (or is off) on this gateway. */
     suspend fun info(): PushPluginReply? = command("info")
 
     suspend fun register(registration: PushRegistration): PushPluginReply =
         command("register " + HermesJson.encodeToString(PushRegistration.serializer(), registration))
-            ?: throw RpcException(0, "Herald push isn't installed on the gateway.")
+            ?: throw RpcException(0, "The herald-push plugin isn't installed on the gateway.")
 
     suspend fun unregister(deviceId: String): Boolean = command("unregister $deviceId")?.ok == true
 
@@ -438,10 +448,10 @@ class PushApi(private val connection: GatewayConnection) {
         const val PLUGIN_REPO = "https://github.com/Giton22/hermes-herald-push"
 
         /** The plugin commit this Herald was built and reviewed against. */
-        const val PLUGIN_REF = "45e76c00c1536245cfca9d5336226e8edb017e69"
+        const val PLUGIN_REF = "eacf6dbab03f10e65f5eafb5fa3915dc99ddfd97"
 
         /** The version at [PLUGIN_REF]: an older copy on the gateway is offered this as an update. */
-        const val PLUGIN_VERSION = "0.4.2"
+        const val PLUGIN_VERSION = "0.5.2"
 
         /** The oldest plugin this Herald works with; an older copy waits for the user to update it. */
         const val MIN_PLUGIN_VERSION = "0.1.1"

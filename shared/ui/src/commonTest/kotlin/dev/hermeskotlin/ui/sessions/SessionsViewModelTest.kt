@@ -78,6 +78,11 @@ class SessionsViewModelTest {
         cache: OfflineCache? = null,
         /** The list can't be read while this says so, whatever [listStatus] is. */
         listFails: () -> Boolean = { false },
+        /** The profiles can't be read while this says so. */
+        profilesFail: () -> Boolean = { false },
+        /** Whether [socket] connects at once; when not, the test starts it through [onConnection]. */
+        connectNow: Boolean = true,
+        onConnection: (GatewayConnection) -> Unit = {},
     ): SessionsViewModel {
         // On the test dispatcher, so no request is still finishing on another thread when a test ends
         // (and resuming onto Dispatchers.Main while the next test sets it).
@@ -90,6 +95,11 @@ class SessionsViewModelTest {
                     if (listFails()) HttpStatusCode.InternalServerError else listStatus, json,
                 )
                 request.url.encodedPath == "/api/auth/ws-ticket" -> respond("""{"ticket":"T","ttl_seconds":30}""", HttpStatusCode.OK, json)
+                request.url.encodedPath.startsWith("/api/profiles") ->
+                    if (profilesFail()) respond("", HttpStatusCode.ServiceUnavailable)
+                    else respond("""{"profiles":[{"name":"default","is_default":true}],"current":"default"}""", HttpStatusCode.OK, json)
+                // A gateway without snapshots, so writes go without an identity (SessionsApiTest covers that).
+                request.url.encodedPath.endsWith("/mutation-snapshot") -> respond("""{"detail":"Not Found"}""", HttpStatusCode.NotFound, json)
                 request.method == HttpMethod.Delete -> respond("""{"detail":"Store is busy"}""", deleteStatus, json)
                 request.method == HttpMethod.Patch -> {
                     patches += request.body.toByteArray().decodeToString()
@@ -102,7 +112,8 @@ class SessionsViewModelTest {
         val client = createHttpClient(MockEngine(config), cookies)
         val auth = AuthApi(client, cookies)
         val connection = GatewayConnection(auth, { _, _ -> socket ?: error("not connecting in tests") }, CoroutineScope(dispatcher))
-        if (socket != null) connection.start(gateway.gatewayUrl)
+        if (socket != null && connectNow) connection.start(gateway.gatewayUrl)
+        onConnection(connection)
         val scope = CoroutineScope(dispatcher)
         val attention = AttentionTracker(connection, ChatHost(connection, SessionsApi(client), scope), ActiveSessions(connection, scope), scope)
         return SessionsViewModel(
@@ -246,6 +257,22 @@ class SessionsViewModelTest {
     }
 
     @Test
+    fun profilesThatCouldntBeReadAreAskedForAgainOnceTheGatewayConnects() = runTest(dispatcher) {
+        var offline = true
+        var connection: GatewayConnection? = null
+        val vm = viewModel(socket = LiveGateway(emptyMap()), profilesFail = { offline }, connectNow = false, onConnection = { connection = it })
+        vm.bind(gateway)
+        vm.awaitLoaded()
+        assertEquals(null, vm.roster.value)
+
+        // Herald opened out of reach; the gateway comes back.
+        offline = false
+        connection!!.start(gateway.gatewayUrl)
+
+        assertEquals("default", vm.roster.first { it != null }?.launch)
+    }
+
+    @Test
     fun eachReadOfTheListIsSaidAsItIsAskedAndWhenItComesBack() = runTest(dispatcher) {
         val vm = viewModel()
         val reads = mutableListOf<ListRead>()
@@ -335,6 +362,43 @@ class SessionsViewModelTest {
         vm.selectProject(null)
         assertEquals(listOf("a", "b"), vm.state.value.listed.map { it.id })
     }
+
+    @Test
+    fun aChangeWhileTheListIsClosedShowsOnceItOpens() = runTest(dispatcher) {
+        val socket = LiveGateway(live = emptyMap(), projects = mapOf("projects.tree" to tree(chats = 1)))
+        val vm = viewModel(socket = socket)
+        vm.bind(gateway)
+        vm.awaitLoaded()
+        vm.state.first { it.projects.isNotEmpty() }
+
+        // A chat starts in the project while the sidebar is closed, moments after the last ask.
+        socket.projects["projects.tree"] = tree(chats = 2)
+        vm.refreshQuietly()
+        vm.awaitLoaded()
+        vm.setVisible(true)
+        advanceTimeBy(1_000)
+        assertEquals(2, vm.state.value.projects.first().sessionCount)
+    }
+
+    @Test
+    fun aChangeInsideTheWaitIsAskedForOnceItEnds() = runTest(dispatcher) {
+        val socket = LiveGateway(live = emptyMap(), projects = mapOf("projects.tree" to tree(chats = 1)))
+        val vm = viewModel(socket = socket)
+        vm.bind(gateway)
+        vm.awaitLoaded()
+        vm.setVisible(true)
+        vm.state.first { it.projects.isNotEmpty() }
+
+        socket.projects["projects.tree"] = tree(chats = 2)
+        vm.refreshQuietly()
+        vm.awaitLoaded()
+        advanceTimeBy(30_001)
+        assertEquals(2, vm.state.value.projects.first().sessionCount)
+    }
+
+    private fun tree(chats: Int) = """{"projects":[
+        {"id":"p1","label":"herald","path":"/srv/herald","sessionCount":$chats},
+        {"id":"__no_project__","label":"Home","isNoProject":true,"sessionCount":1}]}"""
 
     @Test
     fun undoInsideAProjectPutsTheRowBackInTheProject() = runTest(dispatcher) {

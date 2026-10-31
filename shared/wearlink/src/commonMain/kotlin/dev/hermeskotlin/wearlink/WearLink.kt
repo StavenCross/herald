@@ -54,6 +54,21 @@ object WearPaths {
     /** Watch → phone: a [CallEnd], hung up on the watch. */
     const val CALL_END = "/herald/call/end"
 
+    /** Phone → watch: a [WatchRing], Hermes calling for an answer. */
+    const val RING = "/herald/ring"
+
+    /**
+     * Phone → watch: a [RingEnd], the ring is over (answered or declined on the phone, rung out, or answered
+     * elsewhere). Watch → phone: a [RingEnd], picked up ([RingEnd.answered]) or declined on the watch.
+     */
+    const val RING_END = "/herald/ring/end"
+
+    /**
+     * Watch → phone: a [RingOn], the watch rings. Without it (no Herald there, notifications off, on a call) the
+     * phone's own call shows on the watch, as any notification does.
+     */
+    const val RING_ON = "/herald/ring/on"
+
     /** Every path above and below starts with this; the apps' listeners filter on it. */
     const val PREFIX = "/herald/"
 
@@ -334,6 +349,28 @@ data class CallUpdate(
     val scope: WatchScope? = null,
 )
 
+/**
+ * Hermes calling for an answer: approval or question [requestId] waits in chat [chatId] ([title]). Answering on the
+ * watch starts a live call there, which asks it aloud. It never carries the question itself, only that there is one.
+ * [agent]: the agent called on its own, and the call opens with why; nor does that reason travel here.
+ */
+@Serializable
+data class WatchRing(
+    val requestId: String,
+    val chatId: String,
+    val title: String,
+    val approval: Boolean = false,
+    val agent: Boolean = false,
+)
+
+/** The ring for [requestId] is over; from the watch, [answered]: picked up there, else declined. */
+@Serializable
+data class RingEnd(val requestId: String, val answered: Boolean = false)
+
+/** The watch rings for [requestId]. */
+@Serializable
+data class RingOn(val requestId: String)
+
 /** The event-channel message types the phone acts on; the watch keeps the rest (audio deltas and the like) to itself. */
 val CALL_EVENT_TYPES = setOf(
     "session.started",
@@ -426,10 +463,13 @@ fun clipForWatch(text: String, max: Int = MAX_WATCH_TEXT): String {
     return text.substring(0, cut).trimEnd() + "…"
 }
 
-/** Resolved on demand by the phone; cached artwork never determines the call destination. */
+/**
+ * Resolved on demand by the phone; cached artwork never determines the call destination. [live]: the target
+ * talks live; when it doesn't, the watch asks there by voice instead of calling.
+ */
 @Serializable
 data class DefaultCallTarget(val requestId: String, val chatId: String? = null, val botProfile: String? = null,
-    val title: String = "New session", val error: String? = null, val scope: WatchScope? = null)
+    val title: String = "New session", val error: String? = null, val scope: WatchScope? = null, val live: Boolean = true)
 
 /** Display only: revision covers the current target and rendered image. */
 @Serializable

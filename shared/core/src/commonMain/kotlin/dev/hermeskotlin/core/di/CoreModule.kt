@@ -18,6 +18,8 @@ import io.ktor.util.date.getTimeMillis
 import dev.hermeskotlin.core.chat.LastChatStore
 import dev.hermeskotlin.core.chat.ToolRiskStore
 import dev.hermeskotlin.core.capabilities.CapabilitiesApi
+import dev.hermeskotlin.core.capabilities.SkillsHubApi
+import dev.hermeskotlin.core.plugins.NextPromptApi
 import dev.hermeskotlin.core.plugins.PluginsApi
 import dev.hermeskotlin.core.cron.CronApi
 import dev.hermeskotlin.core.insights.InsightsApi
@@ -26,7 +28,9 @@ import dev.hermeskotlin.core.connection.GatewayConnection
 import dev.hermeskotlin.core.gateway.AccessTokens
 import dev.hermeskotlin.core.gateway.ConnectionCheck
 import dev.hermeskotlin.core.gateway.GatewayProbe
+import dev.hermeskotlin.core.gateway.ClientCertAliases
 import dev.hermeskotlin.core.gateway.GatewayRepository
+import dev.hermeskotlin.core.gateway.mtlsEngine
 import dev.hermeskotlin.core.media.LinkPreviews
 import dev.hermeskotlin.core.media.MediaApi
 import dev.hermeskotlin.core.media.publicWebEngine
@@ -39,9 +43,11 @@ import dev.hermeskotlin.core.inbox.InboxStore
 import dev.hermeskotlin.core.push.PushApi
 import dev.hermeskotlin.core.profiles.ProfilesApi
 import dev.hermeskotlin.core.settings.SettingsStore
+import dev.hermeskotlin.core.settings.startInstruction
 import dev.hermeskotlin.core.rpc.openGatewaySocket
 import dev.hermeskotlin.core.sessions.SessionsApi
 import dev.hermeskotlin.core.slash.SlashApi
+import dev.hermeskotlin.core.update.RenameNotice
 import dev.hermeskotlin.core.update.UpdateChecker
 import dev.hermeskotlin.core.journey.JourneyApi
 import dev.hermeskotlin.core.pet.PetApi
@@ -77,7 +83,9 @@ val coreModule = module {
     single { WebCookieJar(get(), get(), get(), get()) }
     single { AccessTokens(get()) }
     single { NativeTokens(get()) }
-    single { createHttpClient(cookies = get<PersistentCookiesStorage>(), access = get(), bearer = get()) }
+    single { ClientCertAliases() }
+    // One engine for the REST calls and the /api/ws upgrade, presenting each gateway's client certificate.
+    single { createHttpClient(engine = mtlsEngine(get(), get()), cookies = get<PersistentCookiesStorage>(), access = get(), bearer = get()) }
     single { GatewayProbe(get()) }
     single {
         val client = get<HttpClient>()
@@ -89,7 +97,9 @@ val coreModule = module {
     single { SessionsApi(get()) }
     single { CronApi(get()) }
     single { CapabilitiesApi(get()) }
+    single { SkillsHubApi(get()) }
     single { PluginsApi(get()) }
+    single { NextPromptApi(get(), get(), get()) }
     single { InsightsApi(get()) }
     single { ConfigApi(get()) }
     single { LastChatStore(get()) }
@@ -107,7 +117,7 @@ val coreModule = module {
     }
     single { ToolRiskStore(get()) }
     single { OfflineCache(get<OfflineDatabase>().dao(), get()) { getTimeMillis() } }
-    single { ChatHost(get(), get(), get(), get(), get()) }
+    single { ChatHost(get(), get(), get(), get(), get(), get()) }
     single { ActiveSessions(get(), get()) }
     single(createdAtStart = true) { AttentionTracker(get(), get(), get(), get()) }
     single(createdAtStart = true) { SessionWatcher(get(), get(), get(), get(), get()) }
@@ -119,7 +129,10 @@ val coreModule = module {
     single { BotsApi(get()) }
     single { ProjectsApi(get()) }
     single { ThreadsApi(get()) }
-    single { ThreadsRepository(get(), get(), get(), get()) }
+    single {
+        val settings = get<SettingsStore>()
+        ThreadsRepository(get(), get(), get(), get(), startInstruction = { settings.startInstruction() })
+    }
     single { BotChats(get<BotsApi>()) }
     single { RoomsApi(get()) }
     single { RoomSeenStore(get()) }
@@ -138,6 +151,7 @@ val coreModule = module {
     // Previews fetch without a tap, so their client also refuses addresses on the user's own networks.
     single { LinkPreviews(createHttpClient(publicWebEngine())) }
     single { UpdateChecker(get(named(OUTSIDE_CLIENT)), get()) }
+    single { RenameNotice(get(), get()) }
     // ntfy is someone else's server: never send it the gateway's cookies.
     single { NtfyClient(get(named(OUTSIDE_CLIENT))) }
     single { PushApi(get()) }
