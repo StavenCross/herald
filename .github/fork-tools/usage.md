@@ -41,3 +41,36 @@ feature branch. The check runner reads upstream CI's actual build/lint/JNI
 commands and adds desktop compilation and available packaging contracts. It does
 not substitute for the Linux workflow's offline package build or Bazzite's real
 GUI, portal, hardware and voice acceptance. Keep those results tied to exact SHAs.
+
+
+## Flatpak qualification (fork only)
+
+`Fork Flatpak qualification` runs weekly on Monday at 08:43 UTC and manually.
+Manual runs select a public branch in this fork and optionally an available
+Freedesktop runtime branch. The normal run rebuilds current master with the
+latest installed updates for the manifest's runtime/SDK, keeping application
+build dependencies locked. It does not automatically upgrade Gradle dependencies.
+Until master contains packaging, it uses the published PR01 packaging branch;
+source SHA, packaging SHA and runtime commit are recorded separately in the run.
+A candidate runtime must actually exist on Flathub; an unavailable branch fails.
+
+The workflow checks the manifest and exported permissions against the reviewed
+network/IPC/X11/DRI baseline. New capabilities need an explicit fork-policy change
+alongside their feature review. It scans exported files and ZIP/JAR/JMOD contents
+for internal-document/config paths and known credential patterns. This is a
+bounded leak detector, not proof that arbitrary personal information is absent.
+No build bundle, profile or unfiltered log is uploaded as an Actions artifact.
+
+On a disposable GitHub-hosted runner only, it installs the actual app, runs its
+bundled JVM, writes a synthetic configuration sentinel from inside the sandbox,
+exports a distinct OSTree commit of the same payload and updates the installation.
+It verifies the commit changed and sandbox data survived. This tests the package
+upgrade mechanism, not application settings/schema migration between versions.
+It does not launch the GUI or contact a gateway. Bazzite GUI, document portal and
+physical audio acceptance remain separate. The smoke script refuses local runners
+or an existing installation. There is no personal-PC self-hosted runner.
+
+This workflow intentionally lives only in the fork's reserved namespace; use its
+manual branch input before submitting a feature upstream. It executes candidate
+build code only in an ephemeral read-only job, without repository secrets or saved
+checkout credentials. Fork PR isolation remains a separate trusted-data-only job.

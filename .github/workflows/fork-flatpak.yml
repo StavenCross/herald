@@ -1,0 +1,82 @@
+name: Fork Flatpak qualification
+on:
+  schedule:
+    - cron: '43 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Public fork branch to build (master checks current upstream application code)
+        type: string
+        default: master
+      runtime:
+        description: Optional available Freedesktop runtime branch, e.g. 27.08; blank uses manifest
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: fork-flatpak-${{ inputs.source_ref || 'master' }}-${{ inputs.runtime || 'default' }}
+  cancel-in-progress: false
+jobs:
+  qualification:
+    if: github.repository == 'StavenCross/kyllene'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          persist-credentials: false
+          path: tooling
+      - name: Select exact public source and packaging
+        env:
+          SOURCE_REF: ${{ inputs.source_ref || 'master' }}
+          RUNTIME: ${{ inputs.runtime }}
+        run: |
+          git check-ref-format "refs/heads/$SOURCE_REF"
+          git clone --filter=blob:none --no-checkout https://github.com/StavenCross/kyllene.git source
+          git -C source fetch origin "refs/heads/$SOURCE_REF"
+          source_sha=$(git -C source rev-parse FETCH_HEAD)
+          git -C source checkout --detach "$source_sha"
+          if [ -f source/packaging/flatpak/io.github.Giton22.Kyllene.Devel.json ]; then
+            packaging_sha=$source_sha
+          else
+            git -C source fetch origin refs/heads/codex/flatpak-pr01-packaging
+            packaging_sha=$(git -C source rev-parse FETCH_HEAD)
+          fi
+          mkdir package
+          git -C source archive "$source_sha" | tar -x -C package
+          git -C source archive "$packaging_sha" packaging/flatpak | tar -x -C package
+          python3 tooling/.github/fork-tools/qualification.py select package/packaging/flatpak/io.github.Giton22.Kyllene.Devel.json --sha "$source_sha" --ref "refs/heads/$SOURCE_REF" --runtime "$RUNTIME"
+          echo "Source: $source_sha; packaging: $packaging_sha" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: jetbrains
+          java-version: '25'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Tool and packaging regression tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml flatpak fontconfig
+          python3 -m unittest discover -s tooling/.github/fork-tools/tests -v
+          (cd package && python3 -m unittest discover -s packaging/flatpak/tests -v)
+      - name: Install latest selected runtime and SDK
+        run: |
+          runtime=$(python3 -c 'import json; print(json.load(open("package/packaging/flatpak/fork-ci.json"))["runtime-version"])')
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.flatpak.Builder "org.freedesktop.Sdk//$runtime" "org.freedesktop.Platform//$runtime"
+          flatpak info --user --show-commit "org.freedesktop.Platform//$runtime" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build locked dependencies offline against selected source
+        run: |
+          user_flatpak=$(realpath "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak")
+          cd package || exit 1
+          flatpak run --env=FLATPAK_USER_DIR="$user_flatpak" --filesystem="$user_flatpak" org.flatpak.Builder --user --repo=repo build packaging/flatpak/fork-ci.json
+      - name: Check exported permissions and package privacy
+        run: python3 tooling/.github/fork-tools/qualification.py scan package/build
+      - name: Install and upgrade in a disposable user session
+        run: dbus-run-session -- bash tooling/.github/fork-tools/install-smoke.sh package/build package/repo
+      - name: Record qualification scope
+        run: |
+          echo 'PASS: offline build, permission policy, package hygiene, fresh installation, bundled JVM, OSTree upgrade and synthetic sandbox-data persistence.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Not covered: application schema migration, GUI/portal/audio acceptance on Bazzite. No bundle or user data uploaded.' >> "$GITHUB_STEP_SUMMARY"
