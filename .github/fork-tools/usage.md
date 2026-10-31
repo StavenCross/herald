@@ -52,6 +52,9 @@ latest installed updates for the manifest's runtime/SDK, keeping application
 build dependencies locked. It does not automatically upgrade Gradle dependencies.
 Until master contains packaging, it uses the published PR01 packaging branch;
 source SHA, packaging SHA and runtime commit are recorded separately in the run.
+The hosted runner installs native `flatpak-builder` from Ubuntu packages. The
+sandboxed Builder uses a desktop host-command service that is absent on a clean
+headless runner; changing its XDG paths does not remove that requirement.
 Packaging font fixtures use the selected SDK fontconfig through a narrow `fc-list`
 wrapper; older host fontconfig versions have different filtering behavior. The
 wrapper grants only the synthetic fixture and read-only test checkout paths.

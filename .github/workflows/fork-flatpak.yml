@@ -58,13 +58,13 @@ jobs:
       - name: Fork tooling regression tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-yaml flatpak fontconfig
+          sudo apt-get install -y python3-yaml flatpak flatpak-builder fontconfig
           python3 -m unittest discover -s tooling/.github/fork-tools/tests -v
       - name: Install latest selected runtime and SDK
         run: |
           runtime=$(python3 -c 'import json; print(json.load(open("package/packaging/flatpak/fork-ci.json"))["runtime-version"])')
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.flatpak.Builder "org.freedesktop.Sdk//$runtime" "org.freedesktop.Platform//$runtime"
+          flatpak install --user --noninteractive flathub "org.freedesktop.Sdk//$runtime" "org.freedesktop.Platform//$runtime"
           flatpak info --user --show-commit "org.freedesktop.Platform//$runtime" >> "$GITHUB_STEP_SUMMARY"
       - name: Packaging tests with the selected SDK font library
         run: |
@@ -76,12 +76,10 @@ jobs:
           python3 -m unittest discover -s packaging/flatpak/tests -v
       - name: Build locked dependencies offline against selected source
         run: |
-          user_flatpak=$(realpath "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak")
+          # Native Builder avoids the desktop host-spawn service required by its Flatpak wrapper.
+          flatpak-builder --version
           cd package || exit 1
-          # Set XDG_DATA_HOME after sandbox startup; Flatpak reserves it at startup.
-          # The desktop wrapper relies on a host-spawn service absent on hosted CI.
-          flatpak run --filesystem="$user_flatpak" --command=env org.flatpak.Builder XDG_DATA_HOME="$(dirname "$user_flatpak")" flatpak info --user "org.freedesktop.Sdk//$(python3 -c 'import json; print(json.load(open("packaging/flatpak/fork-ci.json"))["runtime-version"])')"
-          flatpak run --filesystem="$user_flatpak" --command=env org.flatpak.Builder XDG_DATA_HOME="$(dirname "$user_flatpak")" flatpak-builder --user --repo=repo build packaging/flatpak/fork-ci.json
+          flatpak-builder --user --repo=repo build packaging/flatpak/fork-ci.json
       - name: Check exported permissions and package privacy
         run: python3 tooling/.github/fork-tools/qualification.py scan package/build
       - name: Install and upgrade in a disposable user session
