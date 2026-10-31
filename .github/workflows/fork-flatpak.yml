@@ -78,7 +78,10 @@ jobs:
         run: |
           user_flatpak=$(realpath "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak")
           cd package || exit 1
-          flatpak run --env=FLATPAK_USER_DIR="$user_flatpak" --filesystem="$user_flatpak" org.flatpak.Builder --user --repo=repo build packaging/flatpak/fork-ci.json
+          # Set XDG_DATA_HOME after sandbox startup; Flatpak reserves it at startup.
+          # The desktop wrapper relies on a host-spawn service absent on hosted CI.
+          flatpak run --filesystem="$user_flatpak" --command=env org.flatpak.Builder XDG_DATA_HOME="$(dirname "$user_flatpak")" flatpak info --user "org.freedesktop.Sdk//$(python3 -c 'import json; print(json.load(open("packaging/flatpak/fork-ci.json"))["runtime-version"])')"
+          flatpak run --filesystem="$user_flatpak" --command=env org.flatpak.Builder XDG_DATA_HOME="$(dirname "$user_flatpak")" flatpak-builder --user --repo=repo build packaging/flatpak/fork-ci.json
       - name: Check exported permissions and package privacy
         run: python3 tooling/.github/fork-tools/qualification.py scan package/build
       - name: Install and upgrade in a disposable user session
