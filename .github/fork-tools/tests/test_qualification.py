@@ -67,3 +67,17 @@ class QualificationTest(unittest.TestCase):
             root = Path(tmp)
             (root / 'LICENSE').write_text('Public license')
             q.scan(root)
+
+    def test_hosted_packaging_discovery_has_pillow_available(self):
+        import yaml
+        workflow = Path(__file__).resolve().parents[2] / 'workflows/fork-flatpak.yml'
+        steps = yaml.safe_load(workflow.read_text())['jobs']['qualification']['steps']
+        installed = False
+        for step in steps:
+            command = step.get('run', '')
+            if 'apt-get install' in command and 'python3-pil' in command:
+                installed = True
+            if 'unittest discover -s packaging/flatpak/tests' in command:
+                self.assertTrue(installed, 'Linux packaging discovery requires Pillow first')
+                return
+        self.fail('packaging discovery step missing')

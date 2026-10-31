@@ -58,7 +58,7 @@ jobs:
       - name: Fork tooling regression tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-yaml flatpak flatpak-builder fontconfig
+          sudo apt-get install -y python3-yaml python3-pil flatpak flatpak-builder fontconfig
           python3 -m unittest discover -s tooling/.github/fork-tools/tests -v
       - name: Install latest selected runtime and SDK
         run: |
